@@ -1,54 +1,37 @@
-import React, { useEffect, useState } from "react";
-import { db } from "../firebase";
-import {
-  collection,
-  query,
-  orderBy,
-  limit,
-  onSnapshot,
-} from "firebase/firestore";
+import { useEffect, useState } from 'react';
+import { db } from '../firebase';
+import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
-const LiveSignals = () => {
+export default function LiveSignals() {
   const [latestSignal, setLatestSignal] = useState(null);
 
   useEffect(() => {
-    // Correct nested path to whale_signals > [docID] > signals
-    const q = query(
-      collection(db, "whale_signals", "OgGtHZbcGnBHW9N6Gr9k", "signals"),
-      orderBy("time", "desc"),
-      limit(1)
-    );
+    const docRef = collection(db, 'whale_signals', 'eUeijp0pE22VSzkqC5V1', 'signals');
+    const q = query(docRef, orderBy('time', 'desc'), limit(1));
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      if (!querySnapshot.empty) {
-        const signalData = querySnapshot.docs[0].data();
-        setLatestSignal(signalData);
-      } else {
-        setLatestSignal(null);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const doc = snapshot.docs[0];
+        setLatestSignal(doc.data());
       }
     });
 
     return () => unsubscribe();
   }, []);
 
+  if (!latestSignal) return <div>Loading signal...</div>;
+
   return (
-    <div style={{ color: "gold", textAlign: "center", paddingTop: "20px" }}>
-      {latestSignal ? (
-        <>
-          <h2>
-            {latestSignal.coin} ➤ {latestSignal.action}
-          </h2>
-          <p>{latestSignal.explanation}</p>
-          <p>
-            Confidence: {latestSignal.confidence} <br />
-            Time: {new Date(latestSignal.time.seconds * 1000).toLocaleString()}
-          </p>
-        </>
-      ) : (
-        <p>No recent signals found.</p>
-      )}
+    <div className="text-yellow-300 p-4 text-xl">
+      <strong>{latestSignal.coin}</strong> ► {latestSignal.action}
+      <br />
+      Confidence: <em>{latestSignal.confidence}</em>
+      <br />
+      {latestSignal.explanation}
+      <br />
+      <span className="text-sm text-white">
+        {latestSignal.time?.toDate().toLocaleString()}
+      </span>
     </div>
   );
-};
-
-export default LiveSignals;
+}
