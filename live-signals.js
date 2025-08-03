@@ -1,34 +1,54 @@
-import { db } from "./firebase-config.js";
+import React, { useEffect, useState } from "react";
+import { db } from "../firebase";
 import {
   collection,
   query,
   orderBy,
   limit,
-  onSnapshot
-} from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+  onSnapshot,
+} from "firebase/firestore";
 
-const signalsRef = collection(db, "signals");
-const latestSignalQuery = query(signalsRef, orderBy("time", "desc"), limit(1));
+const LiveSignals = () => {
+  const [latestSignal, setLatestSignal] = useState(null);
 
-const liveSignalsDiv = document.getElementById("live-signals");
+  useEffect(() => {
+    // Correct nested path to whale_signals > [docID] > signals
+    const q = query(
+      collection(db, "whale_signals", "OgGtHZbcGnBHW9N6Gr9k", "signals"),
+      orderBy("time", "desc"),
+      limit(1)
+    );
 
-onSnapshot(latestSignalQuery, (snapshot) => {
-  liveSignalsDiv.innerHTML = "";
-  snapshot.forEach((doc) => {
-    const data = doc.data();
-    const content = `
-      <div>
-        <strong>${data.coin} ➤ ${data.action}</strong><br>
-        ${data.explanation}<br>
-        ${formatTimestamp(data.time)}
-      </div>
-    `;
-    liveSignalsDiv.innerHTML += content;
-  });
-});
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      if (!querySnapshot.empty) {
+        const signalData = querySnapshot.docs[0].data();
+        setLatestSignal(signalData);
+      } else {
+        setLatestSignal(null);
+      }
+    });
 
-function formatTimestamp(timestamp) {
-  if (!timestamp || !timestamp.toDate) return "Invalid date";
-  const date = timestamp.toDate();
-  return date.toISOString().split("T")[0] + " " + date.toTimeString().split(" ")[0];
-}
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <div style={{ color: "gold", textAlign: "center", paddingTop: "20px" }}>
+      {latestSignal ? (
+        <>
+          <h2>
+            {latestSignal.coin} ➤ {latestSignal.action}
+          </h2>
+          <p>{latestSignal.explanation}</p>
+          <p>
+            Confidence: {latestSignal.confidence} <br />
+            Time: {new Date(latestSignal.time.seconds * 1000).toLocaleString()}
+          </p>
+        </>
+      ) : (
+        <p>No recent signals found.</p>
+      )}
+    </div>
+  );
+};
+
+export default LiveSignals;
