@@ -1,37 +1,42 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collectionGroup, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
-export default function LiveSignals() {
-  const [latestSignal, setLatestSignal] = useState(null);
+const LiveSignals = () => {
+  const [signal, setSignal] = useState(null);
 
   useEffect(() => {
-    const docRef = collection(db, 'whale_signals', 'eUeijp0pE22VSzkqC5V1', 'signals');
-    const q = query(docRef, orderBy('time', 'desc'), limit(1));
+    const q = query(
+      collectionGroup(db, 'signals'), // Search all signals collections, regardless of parent
+      orderBy('time', 'desc'), // Sort by timestamp
+      limit(1) // Get only the latest one
+    );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        setLatestSignal(doc.data());
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      if (!querySnapshot.empty) {
+        const latestSignal = querySnapshot.docs[0].data();
+        setSignal(latestSignal);
+      } else {
+        setSignal(null);
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  if (!latestSignal) return <div>Loading signal...</div>;
-
   return (
-    <div className="text-yellow-300 p-4 text-xl">
-      <strong>{latestSignal.coin}</strong> ► {latestSignal.action}
-      <br />
-      Confidence: <em>{latestSignal.confidence}</em>
-      <br />
-      {latestSignal.explanation}
-      <br />
-      <span className="text-sm text-white">
-        {latestSignal.time?.toDate().toLocaleString()}
-      </span>
+    <div style={{ color: 'white', marginTop: '30px' }}>
+      {signal ? (
+        <>
+          <h2>{signal.coin} ▶ {signal.action}</h2>
+          <p><strong>{signal.time?.toDate().toLocaleString() ?? "No time"}</strong></p>
+          <p>{signal.explanation}</p>
+        </>
+      ) : (
+        <p>🐋 No live signal at the moment… Chenda’s still watching!</p>
+      )}
     </div>
   );
-}
+};
+
+export default LiveSignals;
