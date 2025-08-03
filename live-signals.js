@@ -1,24 +1,36 @@
-// live-signals.js
-
 import { db } from "./firebase-config.js";
-import { collection, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
 
-const signalsContainer = document.getElementById("live-signals");
+const signalsRef = collection(db, "signals");
 
-const q = query(collection(db, "whale_signals"), orderBy("timestamp", "desc"));
+// 👇 This query will always get the latest signal document based on time
+const latestSignalQuery = query(signalsRef, orderBy("time", "desc"), limit(1));
 
-onSnapshot(q, (snapshot) => {
-  signalsContainer.innerHTML = ""; // Clear existing signals
+const liveSignalsDiv = document.getElementById("live-signals");
 
+onSnapshot(latestSignalQuery, (snapshot) => {
+  liveSignalsDiv.innerHTML = ""; // clear previous content
   snapshot.forEach((doc) => {
     const data = doc.data();
-    const signalEl = document.createElement("div");
-    signalEl.innerHTML = `
-      <p><strong>${data.coin}</strong> ➤ <span style="color:${
-        data.signal === "BUY" ? "green" : data.signal === "SELL" ? "red" : "orange"
-      }">${data.signal}</span><br><em>${data.explanation}</em><br><small>${new Date(
-      data.timestamp.seconds * 1000
-    ).toLocaleString()}</small></p><hr>`;
-    signalsContainer.appendChild(signalEl);
+    const content = `
+      <div>
+        <strong>${data.coin} ➤ ${data.action}</strong><br>
+        ${data.explanation}<br>
+        ${formatTimestamp(data.time)}
+      </div>
+    `;
+    liveSignalsDiv.innerHTML += content;
   });
 });
+
+function formatTimestamp(timestamp) {
+  if (!timestamp || !timestamp.toDate) return "Invalid date";
+  const date = timestamp.toDate();
+  return date.toISOString().split("T")[0] + " " + date.toTimeString().split(" ")[0];
+}
