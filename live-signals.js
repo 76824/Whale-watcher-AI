@@ -1,16 +1,8 @@
-// live-signals.js
-import { db } from './firebase-config.js';
-import { collection, getDocs } from 'firebase/firestore';
-
-// Reference to the DOM container
 const signalsContainer = document.getElementById('live-signals');
 
-// Async function to load and display signals
 async function loadSignals() {
   try {
-    // Step 1: Reference the outer collection "Whale_signals"
-    const outerCollection = collection(db, 'Whale_signals');
-    const outerSnapshot = await getDocs(outerCollection);
+    const outerSnapshot = await db.collection('Whale_signals').get();
 
     if (outerSnapshot.empty) {
       signalsContainer.innerHTML = '<p>No signals available (outer collection is empty).</p>';
@@ -20,12 +12,12 @@ async function loadSignals() {
     let latestSignal = null;
     let latestTime = 0;
 
-    // Step 2: Loop through documents in Whale_signals
     for (const outerDoc of outerSnapshot.docs) {
-      const signalsSub = collection(db, Whale_signals/${outerDoc.id}/signals);
-      const subSnapshot = await getDocs(signalsSub);
+      const subSnapshot = await db
+        .collection(Whale_signals/${outerDoc.id}/signals)
+        .get();
 
-      subSnapshot.forEach(doc => {
+      subSnapshot.forEach((doc) => {
         const data = doc.data();
         const timestamp = new Date(data.time).getTime();
 
@@ -36,7 +28,6 @@ async function loadSignals() {
       });
     }
 
-    // Step 3: Render result or error message
     if (latestSignal) {
       signalsContainer.innerHTML = `
         <div class="signal-box">
@@ -49,12 +40,10 @@ async function loadSignals() {
     } else {
       signalsContainer.innerHTML = '<p>No recent signals found in any subcollection.</p>';
     }
-
   } catch (error) {
     console.error("❌ Error loading signals:", error);
     signalsContainer.innerHTML = '<p>Error loading signals. Please check console for details.</p>';
   }
 }
 
-// Run on page load
 loadSignals();
