@@ -1,19 +1,16 @@
-// firebase-config.js
-import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+// Firebase config and initialization using global CDN (no imports)
 
-// ✅ Your actual Firebase configuration:
 const firebaseConfig = {
-  apiKey: "AIzaSyDmElr3wUNlRTufZMaphHRiPCgBAgwsFHM",
+  apiKey: "AIzaSyDmE1r3WUNlRTufZMaphHRiPCgBAgwsFHM",
   authDomain: "project-7459169556796997288.firebaseapp.com",
   projectId: "project-7459169556796997288",
   storageBucket: "project-7459169556796997288.appspot.com",
   messagingSenderId: "112926280045",
-  appId: "1:112926280045:web:1aeec7b78d8d41263573264"
+  appId: "1:112926280045:web:iaece7b7d8d41265375264"
 };
 
-// 🔥 Initialize Firebase and Firestore:
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
 
-export { db };
+// Firestore reference
+const db =
