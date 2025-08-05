@@ -1,55 +1,60 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+// live-signals.js
+import { db } from './firebase-config.js';
+import { collection, getDocs } from 'firebase/firestore';
 
-// Firebase config
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+// Reference to the DOM container
+const signalsContainer = document.getElementById('live-signals');
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// Load whale signals
-async function loadWhaleSignals() {
+// Async function to load and display signals
+async function loadSignals() {
   try {
-    const signalsContainer = document.getElementById('live-signals');
-    signalsContainer.innerHTML = ''; // Clear previous signals
+    // Step 1: Reference the outer collection "Whale_signals"
+    const outerCollection = collection(db, 'Whale_signals');
+    const outerSnapshot = await getDocs(outerCollection);
 
-    const querySnapshot = await getDocs(collection(db, 'whale_signals'));
-
-    if (querySnapshot.empty) {
-      signalsContainer.innerHTML = '<p>No whale signals found.</p>';
+    if (outerSnapshot.empty) {
+      signalsContainer.innerHTML = '<p>No signals available (outer collection is empty).</p>';
       return;
     }
 
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
+    let latestSignal = null;
+    let latestTime = 0;
 
-      console.log("📡 Loaded data:", data); // Debug log
+    // Step 2: Loop through documents in Whale_signals
+    for (const outerDoc of outerSnapshot.docs) {
+      const signalsSub = collection(db, Whale_signals/${outerDoc.id}/signals);
+      const subSnapshot = await getDocs(signalsSub);
 
-      const signalElement = document.createElement('div');
-      signalElement.classList.add('signal');
+      subSnapshot.forEach(doc => {
+        const data = doc.data();
+        const timestamp = new Date(data.time).getTime();
 
-      signalElement.innerHTML = `
-        <h3>🐳 ${data.action} ${data.coin}</h3>
-        <p><strong>Confidence:</strong> ${data.confidence}</p>
-        <p><strong>Explanation:</strong> ${data.explanation}</p>
-        <p><strong>Time:</strong> ${new Date(data.time.seconds * 1000).toLocaleString()}</p>
+        if (!isNaN(timestamp) && timestamp > latestTime) {
+          latestTime = timestamp;
+          latestSignal = data;
+        }
+      });
+    }
+
+    // Step 3: Render result or error message
+    if (latestSignal) {
+      signalsContainer.innerHTML = `
+        <div class="signal-box">
+          <h3>📈 ${latestSignal.action} Signal for ${latestSignal.coin}</h3>
+          <p><strong>Confidence:</strong> ${latestSignal.confidence}</p>
+          <p><strong>Reason:</strong> ${latestSignal.explanation}</p>
+          <p><strong>Time:</strong> ${latestSignal.time}</p>
+        </div>
       `;
+    } else {
+      signalsContainer.innerHTML = '<p>No recent signals found in any subcollection.</p>';
+    }
 
-      signalsContainer.appendChild(signalElement);
-    });
   } catch (error) {
-    console.error('🔥 Error fetching whale signals:', error);
-    document.getElementById('live-signals').innerHTML = '<p>Error loading signals.</p>';
+    console.error("❌ Error loading signals:", error);
+    signalsContainer.innerHTML = '<p>Error loading signals. Please check console for details.</p>';
   }
 }
 
-// Run it
-loadWhaleSignals();
+// Run on page load
+loadSignals();
