@@ -1,12 +1,25 @@
-// live-signals.js
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
 
-import { db } from './firebase-config.js';
-import { collection, getDocs } from 'https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js';
+// Firebase config
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
 
-async function fetchWhaleSignals() {
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// Load whale signals
+async function loadWhaleSignals() {
   try {
     const signalsContainer = document.getElementById('live-signals');
-    signalsContainer.innerHTML = ''; // Clear previous content
+    signalsContainer.innerHTML = ''; // Clear previous signals
 
     const querySnapshot = await getDocs(collection(db, 'whale_signals'));
 
@@ -17,6 +30,9 @@ async function fetchWhaleSignals() {
 
     querySnapshot.forEach((doc) => {
       const data = doc.data();
+
+      console.log("📡 Loaded data:", data); // Debug log
+
       const signalElement = document.createElement('div');
       signalElement.classList.add('signal');
 
@@ -30,9 +46,10 @@ async function fetchWhaleSignals() {
       signalsContainer.appendChild(signalElement);
     });
   } catch (error) {
-    console.error('Error fetching whale signals:', error);
+    console.error('🔥 Error fetching whale signals:', error);
     document.getElementById('live-signals').innerHTML = '<p>Error loading signals.</p>';
   }
 }
 
-fetchWhaleSignals();
+// Run it
+loadWhaleSignals();
