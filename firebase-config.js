@@ -1,4 +1,6 @@
-// Firebase configuration and initialization (CDN version)
+// This file assumes Firebase SDKs are loaded globally via CDN in index.html
+// DO NOT use import/export
+
 const firebaseConfig = {
   apiKey: "AIzaSyDmE1r3WUNlRTufZMaphHRiPCgBAgwsFHM",
   authDomain: "project-7459169556796997288.firebaseapp.com",
@@ -8,6 +10,6 @@ const firebaseConfig = {
   appId: "1:112926280045:web:iaece7b7d8d41265375264"
 };
 
-// Initialize Firebase and Firestore using global firebase object
+// Initialize Firebase app and Firestore
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
