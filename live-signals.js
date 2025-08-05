@@ -1,63 +1,44 @@
-import { useEffect, useState } from "react";
-import { db } from "../firebase";
-import {
-  collection,
-  query,
-  orderBy,
-  limit,
-  onSnapshot,
-} from "firebase/firestore";
+import { getFirestore, collection, getDocs } from "firebase/firestore";
+import { app } from "./firebase-config.js";
 
-export default function LiveSignals() {
-  const [latestSignal, setLatestSignal] = useState(null);
+// Initialize Firestore
+const db = getFirestore(app);
 
-  useEffect(() => {
-    const signalsRef = collection(
-      db,
-      "whale_signals",
-      "L5WMFMwFpZw5uj71bnSs", // ✅ Updated document ID
-      "signals"
-    );
+// Reference to whale_signals collection
+const signalsRef = collection(db, "whale_signals");
 
-    const q = query(signalsRef, orderBy("time", "desc"), limit(1));
+// Target container
+const liveSignalsDiv = document.getElementById("live-signals");
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const signalData = snapshot.docs[0].data();
-        setLatestSignal(signalData);
-      }
-    });
+// Fetch and display signals
+async function loadSignals() {
+  try {
+    const querySnapshot = await getDocs(signalsRef);
+    liveSignalsDiv.innerHTML = ""; // Clear placeholder
 
-    return () => unsubscribe();
-  }, []);
+    if (querySnapshot.empty) {
+      liveSignalsDiv.innerHTML = "<p>No signals yet. Chenda is listening...</p>";
+      return;
+    }
 
-  return (
-    <div className="p-6 bg-black text-white rounded-lg shadow-lg">
-      <h2 className="text-xl font-bold mb-4 text-yellow-400">
-        📡 Latest Whale Signal
-      </h2>
-      {latestSignal ? (
-        <div className="space-y-2">
-          <p>
-            <strong>📈 Action:</strong> {latestSignal.action}
-          </p>
-          <p>
-            <strong>🪙 Coin:</strong> {latestSignal.coin}
-          </p>
-          <p>
-            <strong>🤖 Confidence:</strong> {latestSignal.confidence}
-          </p>
-          <p>
-            <strong>💬 Explanation:</strong> {latestSignal.explanation}
-          </p>
-          <p>
-            <strong>🕒 Time:</strong>{" "}
-            {new Date(latestSignal.time.seconds * 1000).toLocaleString()}
-          </p>
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      const signalHTML = `
+        <div class="signal-card">
+          <p><strong>Action:</strong> ${data.action}</p>
+          <p><strong>Coin:</strong> ${data.coin}</p>
+          <p><strong>Confidence:</strong> ${data.confidence}</p>
+          <p><strong>Explanation:</strong> ${data.explanation}</p>
+          <p><strong>Time:</strong> ${data.time.toDate().toLocaleString()}</p>
         </div>
-      ) : (
-        <p className="text-gray-400">No live signals yet...</p>
-      )}
-    </div>
-  );
+        <hr />
+      `;
+      liveSignalsDiv.innerHTML += signalHTML;
+    });
+  } catch (error) {
+    console.error("Error loading signals:", error);
+    liveSignalsDiv.innerHTML = "<p>⚠ Failed to load signals. Please try again later.</p>";
+  }
 }
+
+loadSignals();
