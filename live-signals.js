@@ -1,44 +1,38 @@
-import { getFirestore, collection, getDocs } from "firebase/firestore";
-import { app } from "./firebase-config.js";
+// live-signals.js
 
-// Initialize Firestore
-const db = getFirestore(app);
+import { db } from './firebase-config.js';
+import { collection, getDocs } from 'https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js';
 
-// Reference to whale_signals collection
-const signalsRef = collection(db, "whale_signals");
-
-// Target container
-const liveSignalsDiv = document.getElementById("live-signals");
-
-// Fetch and display signals
-async function loadSignals() {
+async function fetchWhaleSignals() {
   try {
-    const querySnapshot = await getDocs(signalsRef);
-    liveSignalsDiv.innerHTML = ""; // Clear placeholder
+    const signalsContainer = document.getElementById('live-signals');
+    signalsContainer.innerHTML = ''; // Clear previous content
+
+    const querySnapshot = await getDocs(collection(db, 'whale_signals'));
 
     if (querySnapshot.empty) {
-      liveSignalsDiv.innerHTML = "<p>No signals yet. Chenda is listening...</p>";
+      signalsContainer.innerHTML = '<p>No whale signals found.</p>';
       return;
     }
 
     querySnapshot.forEach((doc) => {
       const data = doc.data();
-      const signalHTML = `
-        <div class="signal-card">
-          <p><strong>Action:</strong> ${data.action}</p>
-          <p><strong>Coin:</strong> ${data.coin}</p>
-          <p><strong>Confidence:</strong> ${data.confidence}</p>
-          <p><strong>Explanation:</strong> ${data.explanation}</p>
-          <p><strong>Time:</strong> ${data.time.toDate().toLocaleString()}</p>
-        </div>
-        <hr />
+      const signalElement = document.createElement('div');
+      signalElement.classList.add('signal');
+
+      signalElement.innerHTML = `
+        <h3>🐳 ${data.action} ${data.coin}</h3>
+        <p><strong>Confidence:</strong> ${data.confidence}</p>
+        <p><strong>Explanation:</strong> ${data.explanation}</p>
+        <p><strong>Time:</strong> ${new Date(data.time.seconds * 1000).toLocaleString()}</p>
       `;
-      liveSignalsDiv.innerHTML += signalHTML;
+
+      signalsContainer.appendChild(signalElement);
     });
   } catch (error) {
-    console.error("Error loading signals:", error);
-    liveSignalsDiv.innerHTML = "<p>⚠ Failed to load signals. Please try again later.</p>";
+    console.error('Error fetching whale signals:', error);
+    document.getElementById('live-signals').innerHTML = '<p>Error loading signals.</p>';
   }
 }
 
-loadSignals();
+fetchWhaleSignals();
