@@ -38,7 +38,7 @@ async function loadSignals() {
         </div>
       `;
     } else {
-      signalsContainer.innerHTML = '<p>No recent signals found in subcollections.</p>';
+      signalsContainer.innerHTML = '<p>No recent signals found.</p>';
     }
   } catch (error) {
     console.error("Error loading signals:", error);
