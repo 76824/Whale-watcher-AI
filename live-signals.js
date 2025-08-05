@@ -5,7 +5,7 @@ async function loadSignals() {
     const outerSnapshot = await db.collection('Whale_signals').get();
 
     if (outerSnapshot.empty) {
-      signalsContainer.innerHTML = '<p>No signals available (outer collection is empty).</p>';
+      signalsContainer.innerHTML = '<p>No signals available.</p>';
       return;
     }
 
@@ -38,11 +38,11 @@ async function loadSignals() {
         </div>
       `;
     } else {
-      signalsContainer.innerHTML = '<p>No recent signals found in any subcollection.</p>';
+      signalsContainer.innerHTML = '<p>No recent signals found in subcollections.</p>';
     }
   } catch (error) {
-    console.error("❌ Error loading signals:", error);
-    signalsContainer.innerHTML = '<p>Error loading signals. Please check console for details.</p>';
+    console.error("Error loading signals:", error);
+    signalsContainer.innerHTML = '<p>Error loading signals. See console.</p>';
   }
 }
 
