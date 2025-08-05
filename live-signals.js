@@ -1,23 +1,30 @@
-import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collectionGroup, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { useEffect, useState } from "react";
+import { db } from "../firebase";
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+} from "firebase/firestore";
 
-const LiveSignals = () => {
-  const [signal, setSignal] = useState(null);
+export default function LiveSignals() {
+  const [latestSignal, setLatestSignal] = useState(null);
 
   useEffect(() => {
-    const q = query(
-      collectionGroup(db, 'signals'), // Search all signals collections, regardless of parent
-      orderBy('time', 'desc'), // Sort by timestamp
-      limit(1) // Get only the latest one
+    const signalsRef = collection(
+      db,
+      "whale_signals",
+      "L5WMFMwFpZw5uj71bnSs", // ✅ Updated document ID
+      "signals"
     );
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      if (!querySnapshot.empty) {
-        const latestSignal = querySnapshot.docs[0].data();
-        setSignal(latestSignal);
-      } else {
-        setSignal(null);
+    const q = query(signalsRef, orderBy("time", "desc"), limit(1));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const signalData = snapshot.docs[0].data();
+        setLatestSignal(signalData);
       }
     });
 
@@ -25,18 +32,32 @@ const LiveSignals = () => {
   }, []);
 
   return (
-    <div style={{ color: 'white', marginTop: '30px' }}>
-      {signal ? (
-        <>
-          <h2>{signal.coin} ▶ {signal.action}</h2>
-          <p><strong>{signal.time?.toDate().toLocaleString() ?? "No time"}</strong></p>
-          <p>{signal.explanation}</p>
-        </>
+    <div className="p-6 bg-black text-white rounded-lg shadow-lg">
+      <h2 className="text-xl font-bold mb-4 text-yellow-400">
+        📡 Latest Whale Signal
+      </h2>
+      {latestSignal ? (
+        <div className="space-y-2">
+          <p>
+            <strong>📈 Action:</strong> {latestSignal.action}
+          </p>
+          <p>
+            <strong>🪙 Coin:</strong> {latestSignal.coin}
+          </p>
+          <p>
+            <strong>🤖 Confidence:</strong> {latestSignal.confidence}
+          </p>
+          <p>
+            <strong>💬 Explanation:</strong> {latestSignal.explanation}
+          </p>
+          <p>
+            <strong>🕒 Time:</strong>{" "}
+            {new Date(latestSignal.time.seconds * 1000).toLocaleString()}
+          </p>
+        </div>
       ) : (
-        <p>🐋 No live signal at the moment… Chenda’s still watching!</p>
+        <p className="text-gray-400">No live signals yet...</p>
       )}
     </div>
   );
-};
-
-export default LiveSignals;
+}
