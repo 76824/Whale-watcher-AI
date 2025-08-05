@@ -1,22 +1,25 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Whale Watcher AI – Powered by Chenda</title>
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <div class="container">
-      <h1>Welcome to Whale Watcher AI</h1>
-      <p>👋 Hi, I’m <strong>Chenda</strong> — your witty red-haired AI. Let’s track some whales today!</p>
+<head>
+  <title>Whale Watcher AI – Powered by Chenda</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome to Whale Watcher AI</h1>
+    <p>🧠 Hi, I’m <strong>Chenda</strong> — your witty red-haired AI. Let’s track some whales today!</p>
 
-      <div id="live-signals">
-        <!-- Placeholder for dynamic whale signals -->
-      </div>
+    <div id="live-signals">
+      <!-- Placeholder for dynamic whale signals -->
     </div>
+  </div>
 
-    <!-- Connect to Firebase and App Logic -->
-    <script type="module" src="firebase-config.js"></script>
-    <script type="module" src="app.js"></script>
-    <script type="module" src="live-signals.js"></script>
-  </body>
+  <!-- Firebase SDK via CDN -->
+  <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js"></script>
+
+  <!-- Your Firebase config and logic -->
+  <script src="./firebase-config.js"></script>
+  <script src="./live-signals.js"></script>
+</body>
 </html>
