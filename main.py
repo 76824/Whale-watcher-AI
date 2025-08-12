@@ -619,11 +619,13 @@ async def handle_universe(request):
     asyncio.create_task(metrics_loop())
 
 import os
-# ...
+from aiohttp import web
+
 if __name__ == '__main__':
     app = create_app()
-    app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
-    port = int(os.getenv("PORT", "8080"))
+    app.on_startup.append(start_all)
+    port = int(os.environ.get("PORT"))  # No default, must use Render's PORT
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
