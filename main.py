@@ -444,7 +444,7 @@ async def refresh_symbols_loop():
 async def handle_signal(request):
     headers = {"Access-Control-Allow-Origin": "*"}
 
- async def handle_books(request):
+async def handle_books(request):
     headers = {"Access-Control-Allow-Origin": "*"}
     try:
         sym = (request.rel_url.query.get("symbol", "XRP") or "XRP").upper()
@@ -673,3 +673,4 @@ import os
     app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
+
