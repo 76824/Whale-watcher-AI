@@ -622,8 +622,8 @@ import os
 # ...
 if __name__ == '__main__':
     app = create_app()
-    app.on_startup.append(start_all)   # kicks off the loops
+    app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
-
     web.run_app(app, host="0.0.0.0", port=port)
+
 
