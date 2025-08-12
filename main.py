@@ -443,6 +443,10 @@ async def refresh_symbols_loop():
 # ---------- H) HTTP API ----------
 async def handle_signal(request):
     headers = {"Access-Control-Allow-Origin": "*"}
+    try:
+    min_usd = float(request.rel_url.query.get("min_usd", "200000"))
+except ValueError:
+    min_usd = 200000
 
 async def handle_books(request):
     headers = {"Access-Control-Allow-Origin": "*"}
@@ -469,7 +473,7 @@ async def handle_last(request):
         "ts": GLOBAL_STATE.get("ts", 0),
         "universe": GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0}),
         "running": sorted(list(RUNNING_SYMBOLS)) if 'RUNNING_SYMBOLS' in globals() else [],
-    }, headers=headers)            
+    }, headers=headers))            
 
         # Kraken
         k_pair = next((p for p in KRAKEN_PAIRS if sym in p.replace("/", "").upper()), None)
@@ -654,45 +658,43 @@ async def handle_signal(request):
     return web.json_response(out, headers=headers)
 
 async def handle_books(request):
-    """
-    GET /books?symbol=XRP
-    Returns current orderbook snapshot for the symbol across exchanges.
-    """
     headers = {"Access-Control-Allow-Origin": "*"}
-    sym = (request.rel_url.query.get("symbol") or "").upper()
-    if not sym:
-        return json_resp({"ok": False, "error": "missing ?symbol"}, status=400, headers=headers)
+    try:
+        sym = (request.rel_url.query.get("symbol") or "").upper().replace("-", "").replace("/", "")
+        if not sym:
+            return web.json_response({"ok": False, "error": "missing ?symbol="}, status=400, headers=headers)
 
-    state = GLOBAL_STATE.get("books", {"binance": {}, "kraken": {}})
-    out = {"raw": {}, "best_bid": None, "best_ask": None, "bids": {}, "asks": {}}
+        out = {}
 
-    # Binance
-    bmatch = sym + "USDT"
-    bbook = state.get("binance", {}).get(bmatch)
-    if bbook:
-        bbids = bbook.get("bids", {})
-        basks = bbook.get("asks", {})
-        out["raw"]["binance"] = {
-            "best_bid": max(bbids.keys(), default=None),
-            "best_ask": min(basks.keys(), default=None),
-            "bids": bbids,
-            "asks": basks,
-        }
+        # Binance
+        if sym.endswith("USDT"):
+            b = state["binance"].get(sym, {})
+            bids, asks = b.get("bids", {}), b.get("asks", {})
+            out["binance"] = {
+                "raw": b,
+                "best_bid": max(bids.keys(), default=None),
+                "best_ask": min(asks.keys(), default=None),
+                "bids": bids,
+                "asks": asks,
+            }
 
-    # Kraken
-    kmatch = f"{sym}/USD"
-    kbook = state.get("kraken", {}).get(kmatch)
-    if kbook:
-        kbids = kbook.get("bids", {})
-        kasks = kbook.get("asks", {})
-        out["raw"]["kraken"] = {
-            "best_bid": max(kbids.keys(), default=None),
-            "best_ask": min(kasks.keys(), default=None),
-            "bids": kbids,
-            "asks": kasks,
-        }
+        # Kraken
+        k_pair = next((p for p in KRAKEN_PAIRS if sym in p.replace("/", "").upper()), None)
+        if k_pair and state["kraken"].get(k_pair):
+            k = state["kraken"][k_pair]
+            bids, asks = k.get("bids", {}), k.get("asks", {})
+            out["kraken"] = {
+                "raw": k,
+                "best_bid": max(bids.keys(), default=None),
+                "best_ask": min(asks.keys(), default=None),
+                "bids": bids,
+                "asks": asks,
+            }
 
-    return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
+        return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
+
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500, headers=headers)
 
 async def handle_top(request):
     """
@@ -766,6 +768,7 @@ import os
     app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
