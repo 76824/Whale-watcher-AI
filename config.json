@@ -1,0 +1,11 @@
+{
+  "binance_symbols": ["XRPUSDT", "JASMYUSDT", "PENGUUSDT"],   
+  "kraken_pairs": ["XRP/USD"],                                
+  "depth": 200,
+  "metrics_band_pct": 0.01,
+  "whale_qty": 100000,
+  "trade_window_sec": 300,
+  "port": 8080,
+  "max_symbols": 25,          
+  "scan_interval_sec": 600   
+}
