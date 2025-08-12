@@ -487,13 +487,25 @@ async def handle_last(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, status=200, headers=headers)   
 
-    # Optional query param: /signal?min_usd=1500000
-    try:
-        min_usd = float(request.rel_url.query.get("min_usd", "200000"))
-    except ValueError:
-        min_usd = 200000
+# Optional query param: /signal?min_usd=1500000
+try:
+    min_usd = float(request.rel_url.query.get("min_usd", "200000"))
+except ValueError:
+    min_usd = 200000
 
-    whale_levels = detect_whale_levels_all(min_usd=min_usd)
+whale_levels = detect_whale_levels_all(min_usd=min_usd)
+
+return web.json_response({
+    "ok": True,
+    "running_symbols": sorted(list(RUNNING_SYMBOLS)),
+    "metrics": state["metrics"],
+})
+
+return web.json_response({
+    "ok": True,
+    "running_symbols": sorted(list(RUNNING_SYMBOLS)),
+    "metrics": state["metrics"],
+})
 
     return web.json_response({
         "ok": True,
@@ -754,6 +766,7 @@ import os
     app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
