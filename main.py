@@ -462,7 +462,7 @@ async def handle_books(request):
                 "asks": asks,
             }
             
-async def handle_last(request):
+ async def handle_last(request):
     headers = {"Access-Control-Allow-Origin": "*"}
     return web.json_response({
         "ok": True,
@@ -603,56 +603,137 @@ GLOBAL_STATE = {
     "errors":   [],
 }
 
-# tiny helper to return JSON (faster to call from submodules)
+# --- tiny helper to return JSON (faster to call from submodules)
 def json_resp(data, status=200, headers=None):
-    return web.json_response(data, status=status, headers=headers or {"Access-Control-Allow-Origin":"*"})
+    return web.json_response(
+        data,
+        status=status,
+        headers=headers or {"Access-Control-Allow-Origin": "*"}
+    )
 
-    # --- Minimal global scan (stub) ---
-async def run_global_scan():
-    """
-    Placeholder scanner so the periodic task doesn't crash.
-    Replace the body with your real universe scan when ready.
-    """
-    try:
-        # Example: mark a timestamp so you can verify it runs
-        GLOBAL_STATE["ts"] = time.time()
-
-        # If you already have a real scanner, call it here, e.g.:
-        #   await scan_universe_all()        # <— your function if it exists
-        #   await refresh_top_gainers()      # <— your function if it exists
-
-        return True
-    except Exception as e:
-        print("run_global_scan() error:", e)
-        return False
-
-    # --- periodic global scan loop ---
+# --- periodic global scan loop
 async def periodic_global_scan_task(app):
     while True:
         if ENABLE_GLOBAL_SCAN:
             try:
                 print("🔁 periodic global scan…")
-                findings = await run_global_scan()     # <- whatever your scan returns
-                log_scan_summary(findings or [])
+                await run_global_scan()
             except Exception as e:
-                logger.exception("global scan error: %s", e)
+                print("global scan error:", e)
+        # always sleep so we don't spin even on error
         await asyncio.sleep(GLOBAL_SCAN_EVERY_SEC)
 
-# --- simple API handlers for UI/debug ---
-async def handle_top(request):
-    return json_resp({
+# --- HTTP handlers -------------------------------------------------
+async def handle_signal(request):
+    """
+    (Optional existing handler)
+    Should return a quick snapshot of state (running symbols, whale levels, etc.)
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+    state = GLOBAL_STATE
+    min_usd = CFG.get("whale_qty", 200000)
+    out = {
         "ok": True,
-        "ts": GLOBAL_STATE.get("ts", 0),
-        "top": GLOBAL_STATE.get("features", {}).get("top", []),          # fill in run_global_scan()
-        "notes": "top candidates from the last global scan"
-    })
+        "running_symbols": sorted(list(RUNNING_SYMBOLS)) if "RUNNING_SYMBOLS" in globals() else [],
+        "metrics": state.get("metrics", {}),
+        "whale_levels": state.get("whale_levels", {}),
+        "min_usd": float(min_usd),
+    }
+    return web.json_response(out, headers=headers)
+
+async def handle_books(request):
+    """
+    GET /books?symbol=XRP
+    Returns current orderbook snapshot for the symbol across exchanges.
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+    sym = (request.rel_url.query.get("symbol") or "").upper()
+    if not sym:
+        return json_resp({"ok": False, "error": "missing ?symbol"}, status=400, headers=headers)
+
+    state = GLOBAL_STATE.get("books", {"binance": {}, "kraken": {}})
+    out = {"raw": {}, "best_bid": None, "best_ask": None, "bids": {}, "asks": {}}
+
+    # Binance
+    bmatch = sym + "USDT"
+    bbook = state.get("binance", {}).get(bmatch)
+    if bbook:
+        bbids = bbook.get("bids", {})
+        basks = bbook.get("asks", {})
+        out["raw"]["binance"] = {
+            "best_bid": max(bbids.keys(), default=None),
+            "best_ask": min(basks.keys(), default=None),
+            "bids": bbids,
+            "asks": basks,
+        }
+
+    # Kraken
+    kmatch = f"{sym}/USD"
+    kbook = state.get("kraken", {}).get(kmatch)
+    if kbook:
+        kbids = kbook.get("bids", {})
+        kasks = kbook.get("asks", {})
+        out["raw"]["kraken"] = {
+            "best_bid": max(kbids.keys(), default=None),
+            "best_ask": min(kasks.keys(), default=None),
+            "bids": kbids,
+            "asks": kasks,
+        }
+
+    return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
+
+async def handle_top(request):
+    """
+    GET /top
+    Returns top findings from the last global scan.
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+    return web.json_response(
+        {
+            "ok": True,
+            "ts": GLOBAL_STATE.get("ts", 0),
+            "findings": GLOBAL_STATE.get("last_findings", []),
+        },
+        headers=headers,
+    )
 
 async def handle_universe(request):
-    return json_resp({
-        "ok": True,
-        "ts": GLOBAL_STATE.get("ts", 0),
-        "universe": GLOBAL_STATE.get("universe", {}),
-    })
+    """
+    GET /universe
+    Returns the universe snapshot (symbols/pairs) gathered by the global scan.
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+    uni = GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0})
+    # Guaranteed keys for clients
+    uni.setdefault("binance", [])
+    uni.setdefault("kraken", [])
+    uni.setdefault("ts", GLOBAL_STATE.get("ts", 0))
+    return web.json_response({"ok": True, "ts": uni["ts"], "universe": uni}, headers=headers)
+
+async def handle_last(request):
+    """
+    GET /last
+    Returns the last scan payload & findings.
+    """
+    headers = {"Access-Control-Allow-Origin": "*"}
+    return web.json_response(
+        {
+            "ok": True,
+            "last_scan": GLOBAL_STATE.get("last_scan", {}),
+            "last_findings": GLOBAL_STATE.get("last_findings", []),
+        },
+        headers=headers,
+    )
+
+def create_app():
+    app = web.Application()
+    # existing endpoints
+    app.router.add_get("/signal",   handle_signal)
+    app.router.add_get("/books",    handle_books)
+    app.router.add_get("/top",      handle_top)
+    app.router.add_get("/universe", handle_universe)
+    app.router.add_get("/last",     handle_last)
+    return app
 
     # Start Binance loops for each symbol
     for sym in CFG.get("binance_symbols", []):
@@ -673,4 +754,5 @@ import os
     app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
