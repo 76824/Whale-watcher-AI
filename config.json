@@ -1,5 +1,8 @@
 {
-  "binance_symbols": ["XRPUSDT", "JASMYUSDT", "PENGUUSDT"],   
+  "binance_symbols": [
+  "XRPUSDT", "JASMYUSDT",
+  "SOLUSDT", "BONKUSDT", "PEPEUSDT", "LINKUSDT"
+]   
   "kraken_pairs": ["XRP/USD"],                                
   "depth": 200,
   "metrics_band_pct": 0.01,
@@ -8,4 +11,5 @@
   "port": 8080,
   "max_symbols": 25,          
   "scan_interval_sec": 600   
+
 }
