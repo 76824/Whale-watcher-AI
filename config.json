@@ -6,10 +6,11 @@
   "kraken_pairs": ["XRP/USD"],                                
   "depth": 200,
   "metrics_band_pct": 0.01,
-  "whale_qty": 100000,
-  "trade_window_sec": 300,
+  "whale_qty": 50000,
+  "trade_window_sec": 180,
   "port": 8080,
   "max_symbols": 25,          
-  "scan_interval_sec": 600   
+  "scan_interval_sec": 200   
 
 }
+
