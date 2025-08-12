@@ -50,6 +50,11 @@ def json_resp(data, status=200, headers=None):
 with open(CFG_PATH, "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
+    # DEBUG: confirm config is present on Render
+print("CFG loaded:", list(CFG.keys()),
+      "binance:", len(CFG.get("binance_symbols", [])),
+      "kraken:", len(CFG.get("kraken_pairs", [])))
+
 def log_scan_summary(findings):
     """
     findings: list[dict] like [{"symbol":"XRP","score":92,"reason":"...","price":...}, ...]
@@ -439,6 +444,49 @@ async def refresh_symbols_loop():
 async def handle_signal(request):
     headers = {"Access-Control-Allow-Origin": "*"}
 
+ async def handle_books(request):
+    headers = {"Access-Control-Allow-Origin": "*"}
+    try:
+        sym = (request.rel_url.query.get("symbol", "XRP") or "XRP").upper()
+        out = {}
+
+        # Binance
+        b_raw = next((s for s in BINANCE_SYMBOLS if s.upper().startswith(sym) or sym in s.upper()), None)
+        if b_raw and state["binance"].get(b_raw):
+            b = state["binance"][b_raw]
+            bids, asks = b.get("bids", {}), b.get("asks", {})
+            out["binance"] = {
+                "best_bid": max(bids.keys(), default=None),
+                "best_ask": min(asks.keys(), default=None),
+                "bids": bids,
+                "asks": asks,
+            }
+            
+async def handle_last(request):
+    headers = {"Access-Control-Allow-Origin": "*"}
+    return web.json_response({
+        "ok": True,
+        "ts": GLOBAL_STATE.get("ts", 0),
+        "universe": GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0}),
+        "running": sorted(list(RUNNING_SYMBOLS)) if 'RUNNING_SYMBOLS' in globals() else [],
+    }, headers=headers)            
+
+        # Kraken
+        k_pair = next((p for p in KRAKEN_PAIRS if sym in p.replace("/", "").upper()), None)
+        if k_pair and state["kraken"].get(k_pair):
+            k = state["kraken"][k_pair]
+            bids, asks = k.get("bids", {}), k.get("asks", {})
+            out["kraken"] = {
+                "best_bid": max(bids.keys(), default=None),
+                "best_ask": min(asks.keys(), default=None),
+                "bids": bids,
+                "asks": asks,
+            }
+
+        return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=200, headers=headers)   
+
     # Optional query param: /signal?min_usd=1500000
     try:
         min_usd = float(request.rel_url.query.get("min_usd", "200000"))
@@ -619,13 +667,9 @@ async def handle_universe(request):
     asyncio.create_task(metrics_loop())
 
 import os
-from aiohttp import web
-
-if __name__ == '__main__':
+# ...
+    if __name__ == "__main__":
     app = create_app()
-    app.on_startup.append(start_all)
-    port = int(os.environ.get("PORT"))  # No default, must use Render's PORT
+    app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
+    port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
-
-
-
