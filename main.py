@@ -462,7 +462,7 @@ async def handle_books(request):
                 "asks": asks,
             }
             
- async def handle_last(request):
+async def handle_last(request):
     headers = {"Access-Control-Allow-Origin": "*"}
     return web.json_response({
         "ok": True,
@@ -754,5 +754,6 @@ import os
     app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
     port = int(os.getenv("PORT", "8080"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
