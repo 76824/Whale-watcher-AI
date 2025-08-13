@@ -1,9 +1,37 @@
-# ===== Chenda Orderbook (auto-scan on startup + periodic refresh) =====
-# Python 3.11+. Streams public depth/trades and computes metrics.
+# ===== Whale Watcher AI — main.py =====
+# Python 3.11+. Streams Binance & Kraken public order books/trades,
+# computes quick metrics + whale levels, and exposes a small HTTP API.
+#
+# Endpoints:
+#   GET /signal?min_usd=200000    -> snapshot of metrics + whale levels
+#   GET /books?symbol=XRP         -> merged L2 for a base symbol (XRP)
+#   GET /universe                 -> current tracked universe & timestamp
+#   GET /last                     -> last scan summary (place-holder)
+#
+# Required files (same folder):
+#   - config.json  (see example below)
+#   - .env         (optional; used for flags and PORT on Render)
+#
+# Example config.json
+# {
+#   "binance_symbols": ["XRPUSDT","JASMYUSDT","SOLUSDT","BONKUSDT","PEPEUSDT","LINKUSDT"],
+#   "kraken_pairs": ["XRP/USD"],
+#   "depth": 200,
+#   "metrics_band_pct": 0.01,
+#   "whale_qty": 100000,
+#   "trade_window_sec": 300,
+#   "port": 8080,
+#   "max_symbols": 25,
+#   "scan_interval_sec": 600
+# }
+#
+# Dependencies (requirements.txt):
+# aiohttp==3.9.5
+# websockets==12.0
+# python-dotenv==1.0.1
 
-import os, json, time, asyncio
+import os, json, time, asyncio, logging
 from collections import defaultdict, deque
-import logging
 from logging.handlers import RotatingFileHandler
 
 import aiohttp
@@ -14,16 +42,19 @@ from dotenv import load_dotenv
 # ---------- A) Config & env ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(BASE_DIR, "config.json")
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+load_dotenv(ENV_PATH)
 
-# Logging (optional)
+# Logging (optional but useful on Render)
 LOG_PATH = os.path.join(BASE_DIR, "chenda.log")
 logger = logging.getLogger("chenda")
 logger.setLevel(logging.INFO)
 _handler = RotatingFileHandler(LOG_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-logger.addHandler(_handler)
+if not logger.handlers:
+    logger.addHandler(_handler)
 
+# Load config.json
 with open(CFG_PATH, "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
@@ -44,7 +75,7 @@ BINANCE_TICKERS_URL = "https://api.binance.com/api/v3/ticker/24hr"
 BINANCE_INFO_URL    = "https://api.binance.com/api/v3/exchangeInfo"
 KRAKEN_WS = "wss://ws.kraken.com"
 
-DEPTH_LIMIT     = int(CFG.get("depth", 100))
+DEPTH_LIMIT     = int(CFG.get("depth", 200))
 BAND            = float(CFG.get("metrics_band_pct", 0.01))
 WHALE_QTY       = float(CFG.get("whale_qty", 100000))
 TRADE_WIN_SEC   = int(CFG.get("trade_window_sec", 300))
@@ -173,6 +204,7 @@ def detect_whale_levels_all(min_usd=200000):
 
 # ---------- D) Binance loops ----------
 async def binance_depth_loop(sym: str):
+    # REST snapshot
     url = BINANCE_REST_DEPTH_TMPL.format(sym=sym, limit=min(DEPTH_LIMIT, 1000))
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -183,6 +215,7 @@ async def binance_depth_loop(sym: str):
     book["lastUpdateId"] = snap.get("lastUpdateId")
     prune_book(book)
 
+    # Live depth
     stream = f"{BINANCE_WS}/{sym.lower()}@depth@100ms"
     while True:
         try:
@@ -290,8 +323,8 @@ def compute_metrics():
 
         out[nk] = {
             "mid": round(mid, 6),
-            "band_bid_xrp": round(band_bid, 2),
-            "band_ask_xrp": round(band_ask, 2),
+            "band_bid": round(band_bid, 2),
+            "band_ask": round(band_ask, 2),
             "imbalance_pct": imb,
             "buy_pct_5m": buy_pct,
             "whale_trades_5m": whales
@@ -302,7 +335,8 @@ def compute_metrics():
 async def metrics_loop():
     while True:
         try: compute_metrics()
-        except Exception: pass
+        except Exception as e: 
+            logger.warning("metrics_loop error: %s", e)
         await asyncio.sleep(1.0)
 
 # ---------- G) Dynamic Binance symbol manager ----------
@@ -339,22 +373,27 @@ async def choose_targets(sess):
     active_spot = set()
     if info and "symbols" in info:
         for x in info["symbols"]:
-            if x.get("status") == "TRADING" and x.get("quoteAsset") == "USDT" and x.get("isSpotTradingAllowed", True):
-                active_spot.add(x["symbol"])
+            try:
+                if x.get("status") == "TRADING" and x.get("quoteAsset") == "USDT" and x.get("isSpotTradingAllowed", True):
+                    active_spot.add(x["symbol"])
+            except Exception:
+                continue
 
     pool = []
     if tickers:
-        usdt = [t for t in tickers if t.get("symbol","").endswith("USDT")]
+        usdt = [t for t in tickers if isinstance(t, dict) and t.get("symbol","").endswith("USDT")]
         top_vol   = sorted(usdt, key=lambda t: float(t.get("quoteVolume","0") or 0.0), reverse=True)[:12]
         top_move  = sorted(usdt, key=lambda t: abs(float(t.get("priceChangePercent","0") or 0.0)), reverse=True)[:12]
-        pool = list({t["symbol"] for t in (top_vol + top_move)})
+        pool = list({t["symbol"] for t in (top_vol + top_move) if isinstance(t, dict) and "symbol" in t})
 
+    # keep only active spot, include seeds, keep already running, cap to max
     target = list(dict.fromkeys(SEED_SYMBOLS + list(RUNNING_SYMBOLS) + [s for s in pool if s in active_spot]))
     return target[:MAX_SYMBOLS]
 
 async def initial_scan_and_start():
     """Immediate scan on startup and start streams right away."""
     async with aiohttp.ClientSession() as sess:
+        # ensure seeds start first
         for s in SEED_SYMBOLS:
             await start_symbol(s)
         try:
@@ -372,9 +411,11 @@ async def refresh_symbols_loop():
         while True:
             try:
                 target = await choose_targets(sess)
+                # start any missing
                 for sym in target:
                     if sym not in RUNNING_SYMBOLS:
                         await start_symbol(sym)
+                # stop extras (never stop seeds)
                 for sym in list(RUNNING_SYMBOLS):
                     if sym not in target and sym not in SEED_SYMBOLS:
                         await stop_symbol(sym)
@@ -465,8 +506,7 @@ async def handle_universe(request: web.Request):
     """
     headers = {"Access-Control-Allow-Origin": "*"}
     uni = GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0})
-    uni.setdefault("binance", [])
-    uni.setdefault("kraken", [])
+    uni.setdefault("binance", []); uni.setdefault("kraken", [])
     uni.setdefault("ts", GLOBAL_STATE.get("ts", 0))
     return web.json_response({"ok": True, "ts": uni["ts"], "universe": uni}, headers=headers)
 
@@ -495,10 +535,10 @@ def create_app() -> web.Application:
 
 # ---------- I) Bootstrap ----------
 async def periodic_global_scan_task(app: web.Application):
+    # Placeholder global scan that just stamps ts; replace with your full scan logic.
     while True:
         if ENABLE_GLOBAL_SCAN:
             try:
-                # Example: update ts; replace with your scan logic
                 GLOBAL_STATE["ts"] = int(time.time())
             except Exception as e:
                 print("global scan error:", e)
