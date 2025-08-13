@@ -1,78 +1,42 @@
 # ===== Chenda Orderbook (auto-scan on startup + periodic refresh) =====
-# Python 3.11+ (works on 3.13). Streams public depth/trades and computes metrics.
+# Python 3.11+. Streams public depth/trades and computes metrics.
 
 import os, json, time, asyncio
 from collections import defaultdict, deque
+import logging
+from logging.handlers import RotatingFileHandler
+
 import aiohttp
 from aiohttp import web
 import websockets
 from dotenv import load_dotenv
-import logging
-from logging.handlers import RotatingFileHandler
 
 # ---------- A) Config & env ----------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(_file_))
 CFG_PATH = os.path.join(BASE_DIR, "config.json")
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# --- Logging ---
+# Logging (optional)
 LOG_PATH = os.path.join(BASE_DIR, "chenda.log")
 logger = logging.getLogger("chenda")
 logger.setLevel(logging.INFO)
-
 _handler = RotatingFileHandler(LOG_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
 logger.addHandler(_handler)
 
-import os, time
-from aiohttp import web
-
-# Feature flag
-ENABLE_GLOBAL_SCAN = bool(int(os.getenv("ENABLE_GLOBAL_SCAN", "1")))
-
-# App-wide state
-GLOBAL_STATE = {
-    "universe": {"binance": [], "kraken": [], "ts": 0},
-    "books":    {"binance": {}, "kraken": {}},
-    "trades":   {"binance": [], "kraken": []},
-    "features": {},
-    "rings":    {},
-    "alerts":   [],
-    "errors":   [],
-     "last_scan": {},
-"last_findings": [],
-}
-
-# tiny helper to return JSON (faster to call from submodules)
-def json_resp(data, status=200, headers=None):
-    return web.json_response(data, status=status, headers=headers or {"Access-Control-Allow-Origin":"*"})
-
 with open(CFG_PATH, "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
-    # DEBUG: confirm config is present on Render
-print("CFG loaded:", list(CFG.keys()),
-      "binance:", len(CFG.get("binance_symbols", [])),
-      "kraken:", len(CFG.get("kraken_pairs", [])))
+print(
+    "CFG loaded:",
+    list(CFG.keys()),
+    "binance:", len(CFG.get("binance_symbols", [])),
+    "kraken:", len(CFG.get("kraken_pairs", [])),
+)
 
-def log_scan_summary(findings):
-    """
-    findings: list[dict] like [{"symbol":"XRP","score":92,"reason":"...","price":...}, ...]
-    This will log top candidates and store in GLOBAL_STATE.
-    """
-    if not isinstance(findings, list):
-        logger.info("Global scan returned non-list: %s", type(findings))
-        return
-
-    # sort by score desc if present
-    ranked = sorted(findings, key=lambda x: x.get("score", 0), reverse=True)
-    top = ranked[:10]
-    lines = [f"{i+1:02d}. {f.get('symbol')}  s={f.get('score')}  p={f.get('price')}  r={f.get('reason','')}"
-             for i, f in enumerate(top)]
-    logger.info("Global scan: %d candidates. Top:\n%s", len(ranked), "\n".join(lines))
-
-    GLOBAL_STATE["last_scan"] = {"ts": time.time(), "count": len(ranked)}
-    GLOBAL_STATE["last_findings"] = top    
+# Feature flags / tunables
+ENABLE_GLOBAL_SCAN = bool(int(os.getenv("ENABLE_GLOBAL_SCAN", "1")))
+GLOBAL_SCAN_EVERY_SEC = int(os.getenv("GLOBAL_SCAN_EVERY_SEC", "300"))  # 5 min default
 
 BINANCE_WS = "wss://stream.binance.com:9443/ws"
 BINANCE_REST_DEPTH_TMPL = "https://api.binance.com/api/v3/depth?symbol={sym}&limit={limit}"
@@ -84,7 +48,7 @@ DEPTH_LIMIT     = int(CFG.get("depth", 100))
 BAND            = float(CFG.get("metrics_band_pct", 0.01))
 WHALE_QTY       = float(CFG.get("whale_qty", 100000))
 TRADE_WIN_SEC   = int(CFG.get("trade_window_sec", 300))
-PORT            = int(CFG.get("port", 8080))
+DEFAULT_PORT    = int(CFG.get("port", 8080))
 MAX_SYMBOLS     = int(CFG.get("max_symbols", 25))
 SCAN_INTERVAL   = int(CFG.get("scan_interval_sec", 600))
 
@@ -101,6 +65,19 @@ state = {
 
 RUNNING_SYMBOLS = set()        # currently streaming Binance symbols
 TASKS_PER_SYMBOL = {}          # sym -> [depth_task, trades_task]
+
+GLOBAL_STATE = {
+    "universe": {"binance": [], "kraken": [], "ts": 0},
+    "books":    {"binance": {}, "kraken": {}},
+    "trades":   {"binance": [], "kraken": []},
+    "features": {},
+    "rings":    {},
+    "alerts":   [],
+    "errors":   [],
+    "last_scan": {},
+    "last_findings": [],
+    "ts": 0,
+}
 
 # ---------- C) Helpers ----------
 def prune_book(book: dict, max_levels=300):
@@ -133,10 +110,21 @@ def now_ms(): return int(time.time()*1000)
 
 def norm_key(exchange: str, symbol_or_pair: str) -> str:
     if exchange == "binance":
-        return symbol_or_pair[:-1] if symbol_or_pair.endswith("USDT") else symbol_or_pair
+        return symbol_or_pair[:-4] if symbol_or_pair.upper().endswith("USDT") else symbol_or_pair
     if exchange == "kraken":
         return symbol_or_pair.replace("/", "")
     return symbol_or_pair
+
+def log_scan_summary(findings):
+    if not isinstance(findings, list):
+        logger.info("Global scan returned non-list: %s", type(findings))
+        return
+    ranked = sorted(findings, key=lambda x: x.get("score", 0), reverse=True)[:10]
+    lines = [f"{i+1:02d}. {f.get('symbol')}  s={f.get('score')}  p={f.get('price')}  r={f.get('reason','')}"
+             for i, f in enumerate(ranked)]
+    logger.info("Global scan: %d candidates. Top:\n%s", len(findings), "\n".join(lines))
+    GLOBAL_STATE["last_scan"] = {"ts": time.time(), "count": len(findings)}
+    GLOBAL_STATE["last_findings"] = ranked
 
 def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
     """
@@ -145,7 +133,7 @@ def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
     """
     result = {"bids": [], "asks": []}
 
-    # ---- Binance (per-symbol book) ----
+    # Binance
     b_book = state["binance"].get(symbol, {})
     for side_name in ("bids", "asks"):
         side = b_book.get(side_name, {})
@@ -158,7 +146,7 @@ def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
             if usd >= min_usd:
                 result[side_name].append({"price": p, "qty": q, "usd": usd, "ex": "binance"})
 
-    # ---- Kraken (pair uses slash) ----
+    # Kraken
     k_pair = symbol.replace("USDT", "/USD") if symbol.endswith("USDT") else symbol
     k_book = state["kraken"].get(k_pair, {})
     for side_name in ("bids", "asks"):
@@ -172,53 +160,16 @@ def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
             if usd >= min_usd:
                 result[side_name].append({"price": p, "qty": q, "usd": usd, "ex": "kraken"})
 
-    # sort each side by price level notional, biggest first
     for s in ("bids", "asks"):
         result[s].sort(key=lambda x: x["usd"], reverse=True)
-
-    # remove empty sides if nothing qualifies
-    if not result["bids"] and not result["asks"]:
-        return {}
-    return result
-
+    return result if (result["bids"] or result["asks"]) else {}
 
 def detect_whale_levels_all(min_usd=200000):
-    """
-    Scan every symbol currently running and return whale levels per symbol.
-    """
     out = {}
     for sym in sorted(list(RUNNING_SYMBOLS)):
         levels = detect_whale_levels(sym, min_usd=min_usd)
         if levels:
             out[sym] = levels
-    return out    
-
-    out = {}
-
-    # Scan Binance books
-    for raw_sym, book in state["binance"].items():
-        sym = _sym_from_binance(raw_sym)
-        bids = [(float(p), float(q)) for p, q in book["bids"].items() if float(p) * float(q) >= min_usd]
-        asks = [(float(p), float(q)) for p, q in book["asks"].items() if float(p) * float(q) >= min_usd]
-        if bids or asks:
-            out.setdefault(sym, {}).setdefault("binance", {})
-            out[sym]["binance"]["bids"] = bids
-            out[sym]["binance"]["asks"] = asks
-
-    # Scan Kraken books
-    for pair, book in state["kraken"].items():
-        sym = _sym_from_kraken(pair)
-        bids = [(float(p), float(q)) for p, q in book["bids"].items() if float(p) * float(q) >= min_usd]
-        asks = [(float(p), float(q)) for p, q in book["asks"].items() if float(p) * float(q) >= min_usd]
-        if bids or asks:
-            out.setdefault(sym, {}).setdefault("kraken", {})
-            out[sym]["kraken"]["bids"] = bids
-            out[sym]["kraken"]["asks"] = asks
-
-    # (Optional) keep only symbols we’re actively tracking
-    if RUNNING_SYMBOLS:
-        out = {sym: data for sym, data in out.items() if sym in RUNNING_SYMBOLS}
-
     return out
 
 # ---------- D) Binance loops ----------
@@ -266,7 +217,7 @@ async def binance_trades_loop(sym: str):
         except Exception:
             await asyncio.sleep(1.0)
 
-# ---------- E) Kraken loop (optional) ----------
+# ---------- E) Kraken loop ----------
 async def kraken_ws_loop(pairs: list[str]):
     if not pairs: return
     subs = [
@@ -303,7 +254,6 @@ async def kraken_ws_loop(pairs: list[str]):
 
 # ---------- F) Metrics ----------
 def compute_metrics():
-    # Merge venues by normalized key (e.g., XRPUSD)
     norm_to_sources = defaultdict(list)
     for sym, book in state["binance"].items():
         norm_to_sources[norm_key("binance", sym)].append(("binance", sym, book))
@@ -327,7 +277,6 @@ def compute_metrics():
         tot = band_bid + band_ask
         imb = round(100.0 * band_bid / tot, 2) if tot > 0 else None
 
-        # simple 5m buy% + whale count across sources
         cutoff = now_ms() - TRADE_WIN_SEC*1000
         buys = sells = 0.0; whales = 0
         for ex, key, _ in sources:
@@ -401,17 +350,14 @@ async def choose_targets(sess):
         top_move  = sorted(usdt, key=lambda t: abs(float(t.get("priceChangePercent","0") or 0.0)), reverse=True)[:12]
         pool = list({t["symbol"] for t in (top_vol + top_move)})
 
-    # keep only active spot, include seeds, keep already running, cap to max
     target = list(dict.fromkeys(SEED_SYMBOLS + list(RUNNING_SYMBOLS) + [s for s in pool if s in active_spot]))
     return target[:MAX_SYMBOLS]
 
 async def initial_scan_and_start():
     """Immediate scan on startup and start streams right away."""
     async with aiohttp.ClientSession() as sess:
-        # always ensure seeds start first
         for s in SEED_SYMBOLS:
             await start_symbol(s)
-        # expand to targets
         try:
             target = await choose_targets(sess)
         except Exception:
@@ -427,127 +373,59 @@ async def refresh_symbols_loop():
         while True:
             try:
                 target = await choose_targets(sess)
-                # start any missing
                 for sym in target:
                     if sym not in RUNNING_SYMBOLS:
                         await start_symbol(sym)
-                # stop extras (never stop seeds)
                 for sym in list(RUNNING_SYMBOLS):
                     if sym not in target and sym not in SEED_SYMBOLS:
                         await stop_symbol(sym)
+                GLOBAL_STATE["ts"] = int(time.time())
                 print(f"[manager] running ({len(RUNNING_SYMBOLS)}): {', '.join(sorted(RUNNING_SYMBOLS))[:200]}")
             except Exception as e:
                 print("[manager] refresh error:", e)
             await asyncio.sleep(SCAN_INTERVAL)
 
 # ---------- H) HTTP API ----------
-async def handle_signal(request):
+async def handle_signal(request: web.Request):
+    """
+    GET /signal?min_usd=200000
+    Snapshot of running symbols, metrics, and detected whale levels.
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
     try:
-    min_usd = float(request.rel_url.query.get("min_usd", "200000"))
-except ValueError:
-    min_usd = 200000
+        min_usd = float(request.rel_url.query.get("min_usd", "200000"))
+    except ValueError:
+        min_usd = 200000.0
 
-async def handle_books(request):
-    headers = {"Access-Control-Allow-Origin": "*"}
-    try:
-        sym = (request.rel_url.query.get("symbol") or "").upper().replace("-", "").replace("/", "")
-        if not sym:
-            return web.json_response({"ok": False, "error": "missing ?symbol="}, status=400, headers=headers)
-
-        out = {}
-
-        # Binance
-        if sym.endswith("USDT"):
-            b = state["binance"].get(sym, {})
-            bids, asks = b.get("bids", {}), b.get("asks", {})
-            out["binance"] = {
-                "raw": b,
-                "best_bid": max(bids.keys(), default=None),
-                "best_ask": min(asks.keys(), default=None),
-                "bids": bids,
-                "asks": asks,
-            }
-
-        # Kraken
-        k_pair = next((p for p in KRAKEN_PAIRS if sym in p.replace("/", "").upper()), None)
-        if k_pair and state["kraken"].get(k_pair):
-            k = state["kraken"][k_pair]
-            bids, asks = k.get("bids", {}), k.get("asks", {})
-            out["kraken"] = {
-                "raw": k,
-                "best_bid": max(bids.keys(), default=None),
-                "best_ask": min(asks.keys(), default=None),
-                "bids": bids,
-                "asks": asks,
-            }
-
-        return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
-
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500, headers=headers)
-                        
-async def handle_last(request):
-    headers = {"Access-Control-Allow-Origin": "*"}
-    return web.json_response({
-        "ok": True,
-        "ts": GLOBAL_STATE.get("ts", 0),
-        "universe": GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0}),
-        "running": sorted(list(RUNNING_SYMBOLS)) if 'RUNNING_SYMBOLS' in globals() else [],
-    }, headers=headers)            
-   
-# Optional query param: /signal?min_usd=1500000
-try:
-    min_usd = float(request.rel_url.query.get("min_usd", "200000"))
-except ValueError:
-    min_usd = 200000
-
-whale_levels = detect_whale_levels_all(min_usd=min_usd)
-
-return web.json_response({
-    "ok": True,
-    "running_symbols": sorted(list(RUNNING_SYMBOLS)),
-    "metrics": state["metrics"],
-})
-
-return web.json_response({
-    "ok": True,
-    "running_symbols": sorted(list(RUNNING_SYMBOLS)),
-    "metrics": state["metrics"],
-})
+    whale_levels = detect_whale_levels_all(min_usd=min_usd)
 
     return web.json_response({
         "ok": True,
         "running_symbols": sorted(list(RUNNING_SYMBOLS)),
-        "metrics": state["metrics"],
+        "metrics": state.get("metrics", {}),
         "whale_levels": whale_levels,
         "min_usd": min_usd
     }, headers=headers)
 
-    # --- Live orderbook snapshot endpoint: /books?symbol=XRP  ---
 def _sym_from_binance(raw: str) -> str:
-    # e.g. "XRPUSDT" -> "XRP"
     return raw.upper().replace("USDT", "")
 
 def _sym_from_kraken(raw: str) -> str:
-    # e.g. "XRPUSD" -> "XRP"
-    return raw.upper().replace("USD", "")
+    return raw.upper().replace("/", "").replace("USD", "")
 
-async def handle_books(request):
-    # CORS for browser calls
+async def handle_books(request: web.Request):
+    """
+    GET /books?symbol=XRP
+    Returns best bid/ask and raw books for Binance & Kraken for the given base symbol.
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
-
     sym = (request.rel_url.query.get("symbol", "XRP") or "XRP").upper()
 
     out = {}
 
-    # --- Binance ---
+    # Binance
     try:
-        # state["binance"] is a dict keyed by raw symbols like "XRPUSDT"
-        b_match = next(
-            (k for k in state["binance"].keys() if _sym_from_binance(k) == sym),
-            None
-        )
+        b_match = next((k for k in state["binance"].keys() if _sym_from_binance(k) == sym), None)
         if b_match:
             bbook = state["binance"][b_match]
             bids = bbook.get("bids", {})
@@ -562,13 +440,9 @@ async def handle_books(request):
     except Exception:
         pass
 
-    # --- Kraken ---
+    # Kraken
     try:
-        # state["kraken"] is a dict keyed by pairs like "XRP/USD" or "XRPUSD"
-        k_match = next(
-            (k for k in state["kraken"].keys() if _sym_from_kraken(k.replace("/", "")) == sym),
-            None
-        )
+        k_match = next((k for k in state["kraken"].keys() if _sym_from_kraken(k) == sym), None)
         if k_match:
             kbook = state["kraken"][k_match]
             bids = kbook.get("bids", {})
@@ -583,156 +457,24 @@ async def handle_books(request):
     except Exception:
         pass
 
-async def handle_last(request):
-    headers = {"Access-Control-Allow-Origin": "*"}
-    return web.json_response(
-        {"ok": True, "last": GLOBAL_STATE.get("last_scan", {}), "top": GLOBAL_STATE.get("last_findings", [])},
-        headers=headers
-    )        
-
     return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
 
-def create_app():
-    app = web.Application()
-    app.router.add_get("/signal",   handle_signal)
-    app.router.add_get("/books",    handle_books)     # already added earlier in our /books step
-    app.router.add_get("/top",      handle_top)       # NEW
-    app.router.add_get("/universe", handle_universe)  # NEW
-    app.router.add_get("/last",     handle_last)
-    return app
-
-# ---------- I) Bootstrap ----------
-async def start_all(app):
-    pass
-
-import os, time
-from aiohttp import web
-
-# Feature flag
-ENABLE_GLOBAL_SCAN = bool(int(os.getenv("ENABLE_GLOBAL_SCAN", "1")))
-
-GLOBAL_SCAN_EVERY_SEC = int(os.getenv("GLOBAL_SCAN_EVERY_SEC", "300"))  # 5 min default
-
-# App-wide state
-GLOBAL_STATE = {
-    "universe": {"binance": [], "kraken": [], "ts": 0},
-    "books":    {"binance": {}, "kraken": {}},
-    "trades":   {"binance": [], "kraken": []},
-    "features": {},
-    "rings":    {},
-    "alerts":   [],
-    "errors":   [],
-}
-
-# --- tiny helper to return JSON (faster to call from submodules)
-def json_resp(data, status=200, headers=None):
-    return web.json_response(
-        data,
-        status=status,
-        headers=headers or {"Access-Control-Allow-Origin": "*"}
-    )
-
-# --- periodic global scan loop
-async def periodic_global_scan_task(app):
-    while True:
-        if ENABLE_GLOBAL_SCAN:
-            try:
-                print("🔁 periodic global scan…")
-                await run_global_scan()
-            except Exception as e:
-                print("global scan error:", e)
-        # always sleep so we don't spin even on error
-        await asyncio.sleep(GLOBAL_SCAN_EVERY_SEC)
-
-# --- HTTP handlers -------------------------------------------------
-async def handle_signal(request):
-    """
-    (Optional existing handler)
-    Should return a quick snapshot of state (running symbols, whale levels, etc.)
-    """
-    headers = {"Access-Control-Allow-Origin": "*"}
-    state = GLOBAL_STATE
-    min_usd = CFG.get("whale_qty", 200000)
-    out = {
-        "ok": True,
-        "running_symbols": sorted(list(RUNNING_SYMBOLS)) if "RUNNING_SYMBOLS" in globals() else [],
-        "metrics": state.get("metrics", {}),
-        "whale_levels": state.get("whale_levels", {}),
-        "min_usd": float(min_usd),
-    }
-    return web.json_response(out, headers=headers)
-
-async def handle_books(request):
-    headers = {"Access-Control-Allow-Origin": "*"}
-    try:
-        sym = (request.rel_url.query.get("symbol") or "").upper().replace("-", "").replace("/", "")
-        if not sym:
-            return web.json_response({"ok": False, "error": "missing ?symbol="}, status=400, headers=headers)
-
-        out = {}
-
-        # Binance
-        if sym.endswith("USDT"):
-            b = state["binance"].get(sym, {})
-            bids, asks = b.get("bids", {}), b.get("asks", {})
-            out["binance"] = {
-                "raw": b,
-                "best_bid": max(bids.keys(), default=None),
-                "best_ask": min(asks.keys(), default=None),
-                "bids": bids,
-                "asks": asks,
-            }
-
-        # Kraken
-        k_pair = next((p for p in KRAKEN_PAIRS if sym in p.replace("/", "").upper()), None)
-        if k_pair and state["kraken"].get(k_pair):
-            k = state["kraken"][k_pair]
-            bids, asks = k.get("bids", {}), k.get("asks", {})
-            out["kraken"] = {
-                "raw": k,
-                "best_bid": max(bids.keys(), default=None),
-                "best_ask": min(asks.keys(), default=None),
-                "bids": bids,
-                "asks": asks,
-            }
-
-        return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
-
-    except Exception as e:
-        return web.json_response({"ok": False, "error": str(e)}, status=500, headers=headers)
-
-async def handle_top(request):
-    """
-    GET /top
-    Returns top findings from the last global scan.
-    """
-    headers = {"Access-Control-Allow-Origin": "*"}
-    return web.json_response(
-        {
-            "ok": True,
-            "ts": GLOBAL_STATE.get("ts", 0),
-            "findings": GLOBAL_STATE.get("last_findings", []),
-        },
-        headers=headers,
-    )
-
-async def handle_universe(request):
+async def handle_universe(request: web.Request):
     """
     GET /universe
-    Returns the universe snapshot (symbols/pairs) gathered by the global scan.
+    Universe snapshot (what we’re tracking).
     """
     headers = {"Access-Control-Allow-Origin": "*"}
     uni = GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0})
-    # Guaranteed keys for clients
     uni.setdefault("binance", [])
     uni.setdefault("kraken", [])
     uni.setdefault("ts", GLOBAL_STATE.get("ts", 0))
     return web.json_response({"ok": True, "ts": uni["ts"], "universe": uni}, headers=headers)
 
-async def handle_last(request):
+async def handle_last(request: web.Request):
     """
     GET /last
-    Returns the last scan payload & findings.
+    Last global-scan summary & top findings.
     """
     headers = {"Access-Control-Allow-Origin": "*"}
     return web.json_response(
@@ -744,39 +486,35 @@ async def handle_last(request):
         headers=headers,
     )
 
-def create_app():
+def create_app() -> web.Application:
     app = web.Application()
-    # existing endpoints
     app.router.add_get("/signal",   handle_signal)
     app.router.add_get("/books",    handle_books)
-    app.router.add_get("/top",      handle_top)
     app.router.add_get("/universe", handle_universe)
     app.router.add_get("/last",     handle_last)
     return app
 
-    # Start Binance loops for each symbol
-    for sym in CFG.get("binance_symbols", []):
-        asyncio.create_task(binance_depth_loop(sym))
-        asyncio.create_task(binance_trades_loop(sym))
+# ---------- I) Bootstrap ----------
+async def periodic_global_scan_task(app: web.Application):
+    while True:
+        if ENABLE_GLOBAL_SCAN:
+            try:
+                # your real scan would go here; for now we just stamp ts
+                GLOBAL_STATE["ts"] = int(time.time())
+            except Exception as e:
+                print("global scan error:", e)
+        await asyncio.sleep(GLOBAL_SCAN_EVERY_SEC)
 
-    # Start Kraken aggregated loop (if configured)
-    if CFG.get("kraken_pairs"):
-        asyncio.create_task(kraken_ws_loop(KRAKEN_PAIRS))
-
-    # Metrics loop
+async def start_all(app: web.Application):
     asyncio.create_task(metrics_loop())
+    if KRAKEN_PAIRS:
+        asyncio.create_task(kraken_ws_loop(KRAKEN_PAIRS))
+    asyncio.create_task(initial_scan_and_start())
+    asyncio.create_task(refresh_symbols_loop())
+    asyncio.create_task(periodic_global_scan_task(app))
 
-import os
-# ...
-    if __name__ == "__main__":
+if __name__ == "__main__":
     app = create_app()
-    app.on_startup.append(start_all)   # <-- starts Binance/Kraken + metrics loops
-    port = int(os.getenv("PORT", "8080"))
+    app.on_startup.append(start_all)
+    port = int(os.getenv("PORT", str(DEFAULT_PORT)))
     web.run_app(app, host="0.0.0.0", port=port)
-
-
-
-
-
-
-
