@@ -126,7 +126,10 @@ def log_scan_summary(findings):
     GLOBAL_STATE["last_findings"] = ranked
 
 def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
-    """Return whale levels (>= min_usd notional) for one symbol across Binance (XRPUSDT) and Kraken (XRP/USD)."""
+    """
+    Return whale levels (>= min_usd notional) for one symbol,
+    combining Binance (SYMBOL like 'XRPUSDT') and Kraken (PAIR like 'XRP/USD').
+    """
     result = {"bids": [], "asks": []}
 
     # Binance
@@ -383,7 +386,10 @@ async def refresh_symbols_loop():
 
 # ---------- H) HTTP API ----------
 async def handle_signal(request: web.Request):
-    """GET /signal?min_usd=200000 — Snapshot of running symbols, metrics, and detected whale levels."""
+    """
+    GET /signal?min_usd=200000
+    Snapshot of running symbols, metrics, and detected whale levels.
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
     try:
         min_usd = float(request.rel_url.query.get("min_usd", "200000"))
@@ -407,7 +413,10 @@ def _sym_from_kraken(raw: str) -> str:
     return raw.upper().replace("/", "").replace("USD", "")
 
 async def handle_books(request: web.Request):
-    """GET /books?symbol=XRP — best bid/ask and raw books for Binance & Kraken for the given base symbol."""
+    """
+    GET /books?symbol=XRP
+    Returns best bid/ask and raw books for Binance & Kraken for the given base symbol.
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
     sym = (request.rel_url.query.get("symbol", "XRP") or "XRP").upper()
 
@@ -450,7 +459,10 @@ async def handle_books(request: web.Request):
     return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
 
 async def handle_universe(request: web.Request):
-    """GET /universe — Universe snapshot (what we’re tracking)."""
+    """
+    GET /universe
+    Universe snapshot (what we’re tracking).
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
     uni = GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0})
     uni.setdefault("binance", [])
@@ -459,7 +471,10 @@ async def handle_universe(request: web.Request):
     return web.json_response({"ok": True, "ts": uni["ts"], "universe": uni}, headers=headers)
 
 async def handle_last(request: web.Request):
-    """GET /last — Last global-scan summary & top findings."""
+    """
+    GET /last
+    Last global-scan summary & top findings.
+    """
     headers = {"Access-Control-Allow-Origin": "*"}
     return web.json_response(
         {
@@ -483,6 +498,7 @@ async def periodic_global_scan_task(app: web.Application):
     while True:
         if ENABLE_GLOBAL_SCAN:
             try:
+                # Example: update ts; replace with your scan logic
                 GLOBAL_STATE["ts"] = int(time.time())
             except Exception as e:
                 print("global scan error:", e)
