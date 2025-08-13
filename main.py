@@ -12,7 +12,7 @@ import websockets
 from dotenv import load_dotenv
 
 # ---------- A) Config & env ----------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath('__file__'))
 CFG_PATH = os.path.join(BASE_DIR, "config.json")
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
@@ -518,4 +518,5 @@ if __name__ == "__main__":
     app.on_startup.append(start_all)
     port = int(os.getenv("PORT", str(DEFAULT_PORT)))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
