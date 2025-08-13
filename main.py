@@ -1,34 +1,5 @@
-# ===== Whale Watcher AI — main.py =====
-# Python 3.11+. Streams Binance & Kraken public order books/trades,
-# computes quick metrics + whale levels, and exposes a small HTTP API.
-#
-# Endpoints:
-#   GET /signal?min_usd=200000    -> snapshot of metrics + whale levels
-#   GET /books?symbol=XRP         -> merged L2 for a base symbol (XRP)
-#   GET /universe                 -> current tracked universe & timestamp
-#   GET /last                     -> last scan summary (place-holder)
-#
-# Required files (same folder):
-#   - config.json  (see example below)
-#   - .env         (optional; used for flags and PORT on Render)
-#
-# Example config.json
-# {
-#   "binance_symbols": ["XRPUSDT","JASMYUSDT","SOLUSDT","BONKUSDT","PEPEUSDT","LINKUSDT"],
-#   "kraken_pairs": ["XRP/USD"],
-#   "depth": 200,
-#   "metrics_band_pct": 0.01,
-#   "whale_qty": 100000,
-#   "trade_window_sec": 300,
-#   "port": 8080,
-#   "max_symbols": 25,
-#   "scan_interval_sec": 600
-# }
-#
-# Dependencies (requirements.txt):
-# aiohttp==3.9.5
-# websockets==12.0
-# python-dotenv==1.0.1
+# ===== Chenda Orderbook — robust backend (Binance + optional Kraken) =====
+# Python 3.11+. Streams public depth/trades, computes metrics, detects “whale levels”.
 
 import os, json, time, asyncio, logging
 from collections import defaultdict, deque
@@ -42,19 +13,16 @@ from dotenv import load_dotenv
 # ---------- A) Config & env ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(BASE_DIR, "config.json")
-ENV_PATH = os.path.join(BASE_DIR, ".env")
-load_dotenv(ENV_PATH)
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# Logging (optional but useful on Render)
+# Logging
 LOG_PATH = os.path.join(BASE_DIR, "chenda.log")
 logger = logging.getLogger("chenda")
 logger.setLevel(logging.INFO)
 _handler = RotatingFileHandler(LOG_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
 _handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-if not logger.handlers:
-    logger.addHandler(_handler)
+logger.addHandler(_handler)
 
-# Load config.json
 with open(CFG_PATH, "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
@@ -75,7 +43,7 @@ BINANCE_TICKERS_URL = "https://api.binance.com/api/v3/ticker/24hr"
 BINANCE_INFO_URL    = "https://api.binance.com/api/v3/exchangeInfo"
 KRAKEN_WS = "wss://ws.kraken.com"
 
-DEPTH_LIMIT     = int(CFG.get("depth", 200))
+DEPTH_LIMIT     = int(CFG.get("depth", 100))
 BAND            = float(CFG.get("metrics_band_pct", 0.01))
 WHALE_QTY       = float(CFG.get("whale_qty", 100000))
 TRADE_WIN_SEC   = int(CFG.get("trade_window_sec", 300))
@@ -146,16 +114,6 @@ def norm_key(exchange: str, symbol_or_pair: str) -> str:
         return symbol_or_pair.replace("/", "")
     return symbol_or_pair
 
-def log_scan_summary(findings):
-    if not isinstance(findings, list):
-        logger.info("Global scan returned non-list: %s", type(findings))
-        return
-    ranked = sorted(findings, key=lambda x: x.get("score", 0), reverse=True)[:10]
-    lines = [f"{i+1:02d}. {f.get('symbol')}  s={f.get('score')}  p={f.get('price')}  r={f.get('reason','')}" for i, f in enumerate(ranked)]
-    logger.info("Global scan: %d candidates. Top:\n%s", len(findings), "\n".join(lines))
-    GLOBAL_STATE["last_scan"] = {"ts": time.time(), "count": len(findings)}
-    GLOBAL_STATE["last_findings"] = ranked
-
 def detect_whale_levels(symbol="XRPUSDT", min_usd=200000):
     """
     Return whale levels (>= min_usd notional) for one symbol,
@@ -204,18 +162,20 @@ def detect_whale_levels_all(min_usd=200000):
 
 # ---------- D) Binance loops ----------
 async def binance_depth_loop(sym: str):
-    # REST snapshot
     url = BINANCE_REST_DEPTH_TMPL.format(sym=sym, limit=min(DEPTH_LIMIT, 1000))
     async with aiohttp.ClientSession() as sess:
-        async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            snap = await resp.json()
+        try:
+            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                snap = await resp.json()
+        except Exception as e:
+            logger.warning("Initial depth fetch failed for %s: %s", sym, e)
+            snap = {}
     book = state["binance"][sym]
     book["bids"] = {p:q for p,q in snap.get("bids", [])}
     book["asks"] = {p:q for p,q in snap.get("asks", [])}
     book["lastUpdateId"] = snap.get("lastUpdateId")
     prune_book(book)
 
-    # Live depth
     stream = f"{BINANCE_WS}/{sym.lower()}@depth@100ms"
     while True:
         try:
@@ -232,7 +192,8 @@ async def binance_depth_loop(sym: str):
                         apply_l2_update(book["asks"], d.get("a", []))
                         book["lastUpdateId"] = d["u"]
                         prune_book(book)
-        except Exception:
+        except Exception as e:
+            logger.debug("depth loop %s error: %s", sym, e)
             await asyncio.sleep(1.0)
 
 async def binance_trades_loop(sym: str):
@@ -246,10 +207,11 @@ async def binance_trades_loop(sym: str):
                     price = float(d["p"]); qty = float(d["q"])
                     side = "buy" if not d.get("m", False) else "sell"  # m=True => seller-initiated
                     state["trades"][key].append({"price":price,"qty":qty,"side":side,"ts":int(d["T"])})
-        except Exception:
+        except Exception as e:
+            logger.debug("trades loop %s error: %s", sym, e)
             await asyncio.sleep(1.0)
 
-# ---------- E) Kraken loop ----------
+# ---------- E) Kraken loop (optional) ----------
 async def kraken_ws_loop(pairs: list[str]):
     if not pairs: return
     subs = [
@@ -281,7 +243,8 @@ async def kraken_ws_loop(pairs: list[str]):
                         for t in payload:
                             side = "buy" if t[3] == "b" else "sell"
                             state["trades"][key].append({"price":float(t[0]),"qty":float(t[1]),"side":side,"ts":int(float(t[2])*1000)})
-        except Exception:
+        except Exception as e:
+            logger.debug("kraken loop error: %s", e)
             await asyncio.sleep(1.0)
 
 # ---------- F) Metrics ----------
@@ -323,8 +286,8 @@ def compute_metrics():
 
         out[nk] = {
             "mid": round(mid, 6),
-            "band_bid": round(band_bid, 2),
-            "band_ask": round(band_ask, 2),
+            "band_bid_xrp": round(band_bid, 2),
+            "band_ask_xrp": round(band_ask, 2),
             "imbalance_pct": imb,
             "buy_pct_5m": buy_pct,
             "whale_trades_5m": whales
@@ -335,8 +298,7 @@ def compute_metrics():
 async def metrics_loop():
     while True:
         try: compute_metrics()
-        except Exception as e: 
-            logger.warning("metrics_loop error: %s", e)
+        except Exception as e: logger.debug("metrics error: %s", e)
         await asyncio.sleep(1.0)
 
 # ---------- G) Dynamic Binance symbol manager ----------
@@ -360,7 +322,13 @@ async def fetch_json(session, url):
     for _ in range(3):
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                return await r.json()
+                # Some providers return HTML error pages; guard against that
+                txt = await r.text()
+                try:
+                    data = json.loads(txt)
+                except Exception:
+                    return None
+                return data
         except Exception:
             await asyncio.sleep(0.5)
     return None
@@ -370,30 +338,34 @@ async def choose_targets(sess):
     tickers = await fetch_json(sess, BINANCE_TICKERS_URL)
     info    = await fetch_json(sess, BINANCE_INFO_URL)
 
+    # Guard against non-JSON responses
+    if not isinstance(info, dict): info = {}
+    if not isinstance(tickers, list): tickers = []
+
     active_spot = set()
-    if info and "symbols" in info:
-        for x in info["symbols"]:
-            try:
-                if x.get("status") == "TRADING" and x.get("quoteAsset") == "USDT" and x.get("isSpotTradingAllowed", True):
-                    active_spot.add(x["symbol"])
-            except Exception:
-                continue
+    for x in info.get("symbols", []):
+        try:
+            if x.get("status") == "TRADING" and x.get("quoteAsset") == "USDT" and x.get("isSpotTradingAllowed", True):
+                active_spot.add(x["symbol"])
+        except Exception:
+            continue
 
     pool = []
     if tickers:
-        usdt = [t for t in tickers if isinstance(t, dict) and t.get("symbol","").endswith("USDT")]
-        top_vol   = sorted(usdt, key=lambda t: float(t.get("quoteVolume","0") or 0.0), reverse=True)[:12]
-        top_move  = sorted(usdt, key=lambda t: abs(float(t.get("priceChangePercent","0") or 0.0)), reverse=True)[:12]
-        pool = list({t["symbol"] for t in (top_vol + top_move) if isinstance(t, dict) and "symbol" in t})
+        try:
+            usdt = [t for t in tickers if isinstance(t, dict) and t.get("symbol","").endswith("USDT")]
+            top_vol   = sorted(usdt, key=lambda t: float(t.get("quoteVolume","0") or 0.0), reverse=True)[:12]
+            top_move  = sorted(usdt, key=lambda t: abs(float(t.get("priceChangePercent","0") or 0.0)), reverse=True)[:12]
+            pool = list({t["symbol"] for t in (top_vol + top_move)})
+        except Exception:
+            pool = []
 
-    # keep only active spot, include seeds, keep already running, cap to max
     target = list(dict.fromkeys(SEED_SYMBOLS + list(RUNNING_SYMBOLS) + [s for s in pool if s in active_spot]))
     return target[:MAX_SYMBOLS]
 
 async def initial_scan_and_start():
     """Immediate scan on startup and start streams right away."""
     async with aiohttp.ClientSession() as sess:
-        # ensure seeds start first
         for s in SEED_SYMBOLS:
             await start_symbol(s)
         try:
@@ -411,11 +383,9 @@ async def refresh_symbols_loop():
         while True:
             try:
                 target = await choose_targets(sess)
-                # start any missing
                 for sym in target:
                     if sym not in RUNNING_SYMBOLS:
                         await start_symbol(sym)
-                # stop extras (never stop seeds)
                 for sym in list(RUNNING_SYMBOLS):
                     if sym not in target and sym not in SEED_SYMBOLS:
                         await stop_symbol(sym)
@@ -426,6 +396,19 @@ async def refresh_symbols_loop():
             await asyncio.sleep(SCAN_INTERVAL)
 
 # ---------- H) HTTP API ----------
+async def handle_root(_request: web.Request):
+    return web.Response(
+        text=(
+            "Whale Watcher API\n\n"
+            "Try:\n"
+            "  /signal\n"
+            "  /books?symbol=XRP\n"
+            "  /universe\n"
+            "  /last\n"
+        ),
+        content_type="text/plain"
+    )
+
 async def handle_signal(request: web.Request):
     """
     GET /signal?min_usd=200000
@@ -499,18 +482,19 @@ async def handle_books(request: web.Request):
 
     return web.json_response({"ok": True, "symbol": sym, "books": out}, headers=headers)
 
-async def handle_universe(request: web.Request):
+async def handle_universe(_request: web.Request):
     """
     GET /universe
     Universe snapshot (what we’re tracking).
     """
     headers = {"Access-Control-Allow-Origin": "*"}
     uni = GLOBAL_STATE.get("universe", {"binance": [], "kraken": [], "ts": 0})
-    uni.setdefault("binance", []); uni.setdefault("kraken", [])
+    uni.setdefault("binance", [])
+    uni.setdefault("kraken", [])
     uni.setdefault("ts", GLOBAL_STATE.get("ts", 0))
     return web.json_response({"ok": True, "ts": uni["ts"], "universe": uni}, headers=headers)
 
-async def handle_last(request: web.Request):
+async def handle_last(_request: web.Request):
     """
     GET /last
     Last global-scan summary & top findings.
@@ -527,15 +511,15 @@ async def handle_last(request: web.Request):
 
 def create_app() -> web.Application:
     app = web.Application()
-    app.router.add_get("/signal",   handle_signal)
-    app.router.add_get("/books",    handle_books)
-    app.router.add_get("/universe", handle_universe)
-    app.router.add_get("/last",     handle_last)
+    app.router.add_get("/",        handle_root)
+    app.router.add_get("/signal",  handle_signal)
+    app.router.add_get("/books",   handle_books)
+    app.router.add_get("/universe",handle_universe)
+    app.router.add_get("/last",    handle_last)
     return app
 
 # ---------- I) Bootstrap ----------
-async def periodic_global_scan_task(app: web.Application):
-    # Placeholder global scan that just stamps ts; replace with your full scan logic.
+async def periodic_global_scan_task(_app: web.Application):
     while True:
         if ENABLE_GLOBAL_SCAN:
             try:
