@@ -1,0 +1,77 @@
+:root{
+  --bg:#0e1420; --card:#152239; --chip:#19304f; --muted:#89a2c0;
+  --ink:#e9f2ff; --gold:#f1c76f; --ok:#4cd07a; --warn:#ffb155; --bad:#ff6b6b;
+  --ring: #2a4266;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; font:16px/1.4 Inter,Segoe UI,Arial,sans-serif;
+  color:var(--ink); background:radial-gradient(1000px 600px at 10% -10%,#132042,transparent) , var(--bg);
+}
+.bar{padding:16px 16px 8px; border-bottom:1px solid #0c172a}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.drop{filter:drop-shadow(0 0 10px rgba(73,162,255,.25))}
+.title{font-weight:600; letter-spacing:.2px}
+.tabs{display:flex; gap:10px; flex-wrap:wrap}
+.tab{
+  background:#1a2b49; color:#cfe1ff; border:1px solid #244066;
+  padding:8px 14px; border-radius:999px; cursor:pointer;
+}
+.tab-active{background:var(--gold); color:#111; border-color:transparent; font-weight:700}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:10px}
+.search{
+  flex:1 1 360px; min-width:260px; background:#0d1a2e; border:1px solid #203a5c;
+  color:var(--ink); padding:10px 12px; border-radius:10px; outline:none;
+}
+.ghost{background:#13254a;border:1px solid #28456f;color:#d7e6ff;padding:9px 12px;border-radius:10px;cursor:pointer}
+.chk{display:flex;align-items:center;gap:8px;color:#cfe1ff;opacity:.9}
+.stamp{margin-left:auto;color:#98b2d2}
+#lastUpdated{color:#fff}
+
+main{padding:16px;max-width:1200px;margin:0 auto}
+.view{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.hidden{display:none}
+.col{background:var(--card); border:1px solid #1f3659; border-radius:var(--radius); padding:12px}
+.col-wide{grid-column:1/-1}
+.card-h{display:flex;align-items:center;justify-content:space-between;font-weight:700;margin-bottom:10px}
+.pill{display:inline-flex;align-items:center;gap:6px;background:#102340;border:1px solid #28508a;border-radius:999px;padding:4px 8px;color:#b8cff1;font-size:12px}
+
+.list{display:flex;flex-direction:column;gap:10px}
+.chip{
+  background:var(--chip); border:1px solid #244368; border-radius:12px; padding:10px 12px;
+  display:flex;align-items:center;gap:12px
+}
+.chip:hover{border-color:var(--ring); box-shadow:0 0 0 3px rgba(60,130,255,.12) inset}
+.icon{width:22px;height:22px;border-radius:50%;background:#21395d;display:inline-block}
+.tag{font-size:11px; color:#9fc2ff; background:#11305a; border:1px solid #2b4f82; border-radius:999px; padding:2px 6px}
+strong{letter-spacing:.2px}
+small{color:#aecdff}
+.price{margin-left:auto; color:#dff4ff}
+
+.recs{display:flex;flex-direction:column;gap:10px}
+.rec{
+  background:linear-gradient(180deg,#172a49,#14243f);
+  border:1px solid #2a4672;border-radius:12px;padding:12px
+}
+.rec .head{display:flex;align-items:center;gap:10px}
+.badge{font-size:12px;border-radius:6px;padding:2px 6px;border:1px solid #2f4f81;background:#102340;color:#bcd5ff}
+.conf{margin-left:auto;color:#bcd5ff}
+.sig-buy{color:var(--ok)} .sig-hold{color:var(--warn)} .sig-sell{color:var(--bad)}
+.reason{margin-top:8px;color:#cfe1ff}
+
+.chat{margin-top:18px;background:var(--card);border:1px solid #1f3659;border-radius:var(--radius);padding:12px}
+.chat-h{font-weight:700;margin-bottom:8px}
+.chat-log{height:140px;overflow:auto;background:#0f1e36;border:1px solid #243f67;border-radius:10px;padding:10px;margin-bottom:8px}
+.msg{margin:4px 0}
+.me{color:#d0ffe2} .her{color:#ffe4b6}
+.chat-row{display:flex;gap:10px}
+.chat-input{flex:1;background:#0d1a2e;border:1px solid #203a5c;color:var(--ink);padding:10px 12px;border-radius:10px}
+.send{background:var(--gold);color:#111;border:none;border-radius:10px;padding:10px 14px;cursor:pointer}
+
+.foot{opacity:.6;text-align:center;padding:18px}
+
+@media (max-width:900px){
+  .view{grid-template-columns:1fr}
+}
