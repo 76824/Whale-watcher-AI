@@ -1,3 +1,28 @@
 aiohttp==3.9.5
 websockets==12.0
 python-dotenv==1.0.1
+
+# Core server framework
+flask
+flask-cors
+
+# HTTP requests
+requests
+
+# Async and websocket handling
+aiohttp
+websockets
+
+# For scheduling tasks if used
+schedule
+
+# For working with JSON data
+ujson
+
+# Binance & Kraken API clients (if used)
+python-binance
+krakenex
+
+# Optional: for numeric calculations
+numpy
+pandas
