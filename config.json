@@ -1,0 +1,10 @@
+{
+  "symbols": [
+    "XRP",
+    "SOL",
+    "LINK"
+  ],
+  "depth": 200,
+  "whale_qty": 200000,
+  "port": 10000
+}
